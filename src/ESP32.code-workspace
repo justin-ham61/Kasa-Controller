@@ -1,0 +1,18 @@
+{
+	"folders": [
+		{
+			"path": "../../../../ESP32"
+		},
+		{
+			"name": "Kasa-Controller",
+			"path": ".."
+		}
+	],
+	"settings": {
+		"files.associations": {
+			"*.ejs": "html",
+			"arduinojson.h": "c",
+			"ostream": "cpp"
+		}
+	}
+}
