@@ -49,6 +49,9 @@ static TaskHandle_t wifi_task_handle = NULL;
 TimerHandle_t xIdleTimer;
 esp_sleep_source_t wakeup_source; 
 
+//Wifi Dependancies
+SemaphoreHandle_t wifiSemaphore;
+volatile wl_status_t wifi_status; 
 
 IRAM_ATTR void buttonHandle1(){
     if(button_state_flag & 1){
@@ -120,9 +123,20 @@ void vButtonTimerCallback(TimerHandle_t xTimer){
             }
         }
     }
+    if(xTimerStart(xIdleTimer, portMAX_DELAY) != pdTRUE){
+        Serial.println("Failed to start idle timer");
+    }
 }
 
 void vIdleTimerCallback(TimerHandle_t xIdleTimer){
+    Serial.println("Waiting for semaphore for idle");
+
+    //Awaits tasks that depend on wifi to finish before going to sleep
+    xSemaphoreTake(wifiSemaphore, portMAX_DELAY);
+    Serial.println("Disconnected WiFi and going to sleep");
+    vTaskDelay(100/portTICK_PERIOD_MS);
+    WiFi.disconnect();
+    esp_sleep_enable_gpio_wakeup();
     esp_light_sleep_start();
 }
 
@@ -130,10 +144,14 @@ void readCommandTask(void *parameter){
     command curr_command;
     while(1){
         if(xQueueReceive(command_queue, (void *)&curr_command, portMAX_DELAY) == pdTRUE){
+            xSemaphoreTake(wifiSemaphore, portMAX_DELAY);
             Serial.print("Index: ");
             Serial.println(curr_command.index);
             Serial.print("State: ");
             Serial.println(curr_command.state);
+            xSemaphoreGive(wifiSemaphore);
+        } else {
+            Serial.println("Waiting for wifi connection");
         }
     }
 }
@@ -145,16 +163,42 @@ void displayTask(void *parameter){
     }
 }
 
+void WiFiEvent(WiFiEvent_t event){
+    switch(event){
+        case SYSTEM_EVENT_STA_GOT_IP:
+            Serial.println("WiFi Connected");
+            Serial.print("IP Address: ");
+            Serial.println(WiFi.localIP());
+            xSemaphoreGive(wifiSemaphore);
+            break;
+        case SYSTEM_EVENT_STA_DISCONNECTED:
+            xSemaphoreTake(wifiSemaphore, 0);
+            Serial.println("Attempting to reconnect");
+            WiFi.reconnect();
+            break;
+        default:
+            break;
+    }
+}
 void connectToWifi(void *parameter){
     while(1){
+        WiFi.disconnect(true);
+
+        xSemaphoreTake(wifiSemaphore, portMAX_DELAY);
+
+        vTaskDelay(500/portTICK_PERIOD_MS);
+
+        WiFi.onEvent(WiFiEvent);
+
         WifiParameters_t *wifi_params = (WifiParameters_t *)parameter;
         WiFi.begin(wifi_params->SSID, wifi_params->PASSWORD);
         while(WiFi.status() != WL_CONNECTED){
             delay(500);
             Serial.println(".");
         }
+        
         Serial.println("Connected to the WiFi network");
-        vTaskDelete(NULL);
+        vTaskDelete(NULL); 
     }
 }
 
@@ -164,17 +208,24 @@ void setup() {
     vTaskDelay(200/portTICK_PERIOD_MS);
 
     esp_sleep_enable_wifi_wakeup();
+    
+    wifiSemaphore = xSemaphoreCreateBinary();
+    if(wifiSemaphore == NULL){
+        Serial.println("Unable to create wifi semaphore");
+        while(1);
+    } else {
+        xSemaphoreGive(wifiSemaphore);
+    }
 
     xTaskCreatePinnedToCore(
         connectToWifi, 
         "Wifi Task",
-        1024,
+        4096,
         &wifi_params, 
         4,
         &wifi_task_handle,
         app_cpu
     );
-
 
     //Command Queue Intialization
     command_queue = xQueueCreate(max_command_queue_len, sizeof(command));
@@ -217,7 +268,7 @@ void setup() {
     xTaskCreatePinnedToCore(
         displayTask,
         "Display Task",
-        1048,
+        1024,
         NULL,
         1,
         &display_task_handle,
@@ -235,6 +286,14 @@ void setup() {
     attachInterrupt(digitalPinToInterrupt(SW_3_PIN), buttonHandle3, RISING);
     attachInterrupt(digitalPinToInterrupt(SW_4_PIN), buttonHandle4, RISING);
     attachInterrupt(digitalPinToInterrupt(SW_5_PIN), buttonHandle5, RISING);
+
+    gpio_wakeup_enable(GPIO_NUM_25, GPIO_INTR_HIGH_LEVEL);
+    gpio_wakeup_enable(GPIO_NUM_26, GPIO_INTR_HIGH_LEVEL);
+    gpio_wakeup_enable(GPIO_NUM_27, GPIO_INTR_HIGH_LEVEL);
+    gpio_wakeup_enable(GPIO_NUM_14, GPIO_INTR_HIGH_LEVEL);
+    gpio_wakeup_enable(GPIO_NUM_12, GPIO_INTR_HIGH_LEVEL);
+
+    xTimerStart(xIdleTimer, portMAX_DELAY);
 }
 
 void loop(){
