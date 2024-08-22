@@ -2,13 +2,15 @@
 #define CONFIG_H
 
 typedef struct {
-    char* SSID;
-    char* PASSWORD;
+    const char* SSID;
+    const char* PASSWORD;
 } WifiParameters_t;
 
-WifiParameters_t wifi_params = {"Odyssey", "Blue4524."};
+const char* SSID = "Odyssey";
+const char* PASS = "Blue4524.";
+WifiParameters_t wifi_params = {SSID, PASS};
 
-char* aliases[] = {
+const char* aliases[] = {
   "Lauter",
   "Dejsa",
   "Ball"
