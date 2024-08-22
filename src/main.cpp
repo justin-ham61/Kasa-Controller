@@ -7,6 +7,8 @@
 #include "driver/gpio.h"
 #include "typedef/command.h"
 #include "config.h"
+#include "esp_sleep.h"
+
 #include <ArduinoJson.h>
 #include <AiEsp32RotaryEncoder.h>
 #include <AiEsp32RotaryEncoderNumberSelector.h>
@@ -29,7 +31,7 @@ AiEsp32RotaryEncoder menu_rotary_encoder = AiEsp32RotaryEncoder(MENU_ROTARY_DT, 
 static const uint8_t max_command_queue_len = 10;
 static QueueHandle_t command_queue;
 
-//Debounce and Button Timer
+//Debounce and Button Queue Timers
 TimerHandle_t xTimer;
 
 //Button Flag
@@ -42,6 +44,11 @@ uint8_t bulb_state_flag;
 static TaskHandle_t command_read_task_handle = NULL;
 static TaskHandle_t display_task_handle = NULL;
 static TaskHandle_t wifi_task_handle = NULL;
+
+//Sleep Handles
+TimerHandle_t xIdleTimer;
+esp_sleep_source_t wakeup_source; 
+
 
 IRAM_ATTR void buttonHandle1(){
     if(button_state_flag & 1){
@@ -115,6 +122,10 @@ void vButtonTimerCallback(TimerHandle_t xTimer){
     }
 }
 
+void vIdleTimerCallback(TimerHandle_t xIdleTimer){
+    esp_light_sleep_start();
+}
+
 void readCommandTask(void *parameter){
     command curr_command;
     while(1){
@@ -135,20 +146,24 @@ void displayTask(void *parameter){
 }
 
 void connectToWifi(void *parameter){
-    WifiParameters_t *wifi_params = (WifiParameters_t *)parameter;
-    WiFi.begin(wifi_params->SSID, wifi_params->PASSWORD);
-    while(WiFi.status() != WL_CONNECTED){
-        delay(500);
-        Serial.println(".");
+    while(1){
+        WifiParameters_t *wifi_params = (WifiParameters_t *)parameter;
+        WiFi.begin(wifi_params->SSID, wifi_params->PASSWORD);
+        while(WiFi.status() != WL_CONNECTED){
+            delay(500);
+            Serial.println(".");
+        }
+        Serial.println("Connected to the WiFi network");
+        vTaskDelete(NULL);
     }
-    Serial.println("Connected to the WiFi network");
-    vTaskDelete(NULL);
 }
 
 
 void setup() {
     Serial.begin(115200);
     vTaskDelay(200/portTICK_PERIOD_MS);
+
+    esp_sleep_enable_wifi_wakeup();
 
     xTaskCreatePinnedToCore(
         connectToWifi, 
@@ -173,7 +188,19 @@ void setup() {
         vButtonTimerCallback
     );
     if(xTimer == NULL){
-        Serial.println("Was not able to initialize a timer");
+        Serial.println("Was not able to initialize a debounce timer");
+    }
+
+    //Sleep timer
+    xIdleTimer = xTimerCreate(
+        "Idle Timer",
+        pdMS_TO_TICKS(15000),
+        pdFALSE,
+        (void *)0,
+        vIdleTimerCallback
+    );
+    if(xIdleTimer == NULL){
+        Serial.println("Was not able to initialize idle timer");
     }
     
     //Command Read Task Initialization
