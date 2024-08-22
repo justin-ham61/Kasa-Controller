@@ -152,7 +152,7 @@ void setup() {
 
     xTaskCreatePinnedToCore(
         connectToWifi, 
-        "Wifi Task", 
+        "Wifi Task",
         1024,
         &wifi_params, 
         4,
