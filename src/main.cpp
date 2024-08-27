@@ -84,7 +84,7 @@ int numberOfBulbs;
 uint8_t device_mode = 0b00000001;
 
 //Display config
-#define OLED_ADDRESS 0x3C
+#define OLED_ADDR 0x3C
 Adafruit_SSD1306 display(128, 64, &Wire, -1);
 menu_item menuItems[size + 1];
 
@@ -93,9 +93,7 @@ IRAM_ATTR void buttonHandle1(){
         return;
     } else {
         button_state_flag |= 1;
-        if(xTimerStartFromISR(xTimer, 0) != pdPASS){
-            return;
-        }
+        xTimerStart(xTimer, 0);
     }
 }
 IRAM_ATTR void buttonHandle2(){
@@ -140,18 +138,18 @@ IRAM_ATTR void buttonHandle5(){
 }
 IRAM_ATTR void readEncoderISRQuick(){
     quick_rotary_encoder->readEncoder_ISR();
+    xTimerStartFromISR(xQuickRotaryTimer, 0);
+    xTimerStartFromISR(xIdleTimer, 0);
 }
 IRAM_ATTR void readEncoderISRMenu(){
     menu_rotary_encoder.readEncoder_ISR();
+    xTaskNotifyGive(display_task_handle);
+    xTimerStartFromISR(xIdleTimer, 0);
 }
 
 // Handles buttons based on current context and adds the command to the queue
 // Button presses should get translated to toggle or color based on what the current mode is 
 void vButtonTimerCallback(TimerHandle_t xTimer){
-    if(digitalRead(SW_1_PIN) == HIGH && digitalRead(SW_5_PIN)){
-        button_state_flag = 0;
-        vTaskResume(device_discover_task_handle);
-    } else {
         command new_command;
         for(int i = 0; i < 5; i++){
             uint8_t curr_bitmask = 1 << i;
@@ -166,7 +164,6 @@ void vButtonTimerCallback(TimerHandle_t xTimer){
                 }
             }
         }   
-    }
     if(xTimerStart(xIdleTimer, portMAX_DELAY) != pdTRUE){
         Serial.println("Failed to start idle timer");
     }
@@ -177,12 +174,13 @@ void vIdleTimerCallback(TimerHandle_t xIdleTimer){
     //Awaits tasks that depend on wifi to finish before going to sleep
     xSemaphoreTake(wifiSemaphore, portMAX_DELAY);
     Serial.println("Disconnected WiFi and going to sleep");
-    vTaskDelay(100/portTICK_PERIOD_MS);
     WiFi.disconnect();
+    esp_sleep_enable_gpio_wakeup();
     display.clearDisplay();
     display.display();
-    esp_sleep_enable_gpio_wakeup();
+    vTaskDelay(100/portTICK_PERIOD_MS);
     esp_light_sleep_start();
+    vTaskDelay(100/portTICK_PERIOD_MS);
     WiFi.reconnect();
 }
 
@@ -245,6 +243,7 @@ void toggleTask(void *parameter){
             if(currentBulb->err_code == 1){
                 menuItems[toggle_command.index].icon = 2;
             }
+            xTaskNotifyGive(display_task_handle);
             xSemaphoreGive(wifiSemaphore);
         }
     }
@@ -262,27 +261,6 @@ void brightnessTask(void *parameter){
     }
 }
 
-void quickRotaryTask(void *parameter){
-    while(1){
-        if(quick_rotary_encoder->encoderChanged()){
-            xTimerStart(xQuickRotaryTimer, 0);
-            if(xTimerStart(xIdleTimer, portMAX_DELAY) != pdTRUE){
-                Serial.println("Failed to start idle timer");
-            }
-        }
-    }
-}
-void menuRotaryTask(void *parameter){
-    while(1){
-        if(menu_rotary_encoder.encoderChanged()){
-            vTaskResume(display_task_handle);
-            if(xTimerStart(xIdleTimer, portMAX_DELAY) != pdTRUE){
-                Serial.println("Failed to start idle timer");
-            }
-        }
-    }
-}
-
 void menuDisplayTask(void *parameter){
     int currItem;
     int previousItem;
@@ -290,6 +268,7 @@ void menuDisplayTask(void *parameter){
 
     while(1){
         //Wait for a signal from the rotary encoder to update the diplay
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
         currItem = menu_rotary_encoder.readEncoder();
         previousItem = currItem - 1;
         if(previousItem < 0){
@@ -331,7 +310,6 @@ void menuDisplayTask(void *parameter){
 
         //Display
         display.display();
-        vTaskSuspend(NULL);
     }
 }
 
@@ -381,9 +359,10 @@ void addDevices(void *parameter){
         numberOfBulbs = kasaUtil.ScanDevicesAndAdd(1000, aliases, size);
         for(int i = 0; i < numberOfBulbs; i++){
             Serial.println(kasaUtil.GetSmartPlugByIndex(i)->alias);
-            menuItems[i] = {kasaUtil.GetSmartPlugByIndex(i)->alias, 0};
+            menuItems[i] = {kasaUtil.GetSmartPlugByIndex(i)->alias, 1};
         }
         menuItems[numberOfBulbs] = {"Reset", 3};
+        xTaskNotifyGive(display_task_handle);
         xSemaphoreGive(wifiSemaphore);
         vTaskSuspend(NULL);
     }
@@ -392,13 +371,6 @@ void addDevices(void *parameter){
 void setup() {
     Serial.begin(115200);
     vTaskDelay(200/portTICK_PERIOD_MS);
-
-    display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDRESS);
-    display.setTextColor(WHITE);
-    display.setTextSize(1);
-    display.setFont();
-    display.display(); // Display the message
-    display.clearDisplay();
 
     // ------------------------------------ WIFI TASK INIT ------------------------------------------ //
     wifiSemaphore = xSemaphoreCreateBinary();
@@ -419,6 +391,12 @@ void setup() {
         app_cpu
     );
 
+    display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR);
+    display.setTextColor(WHITE);
+    display.setTextSize(1);
+    display.setFont();
+    display.display(); // Display the message
+    display.clearDisplay();
     // ------------------------------------ KASA BULB INIT ------------------------------------------ //
     xTaskCreatePinnedToCore(
         addDevices,
@@ -512,37 +490,12 @@ void setup() {
     quick_number_selector.setValue(50);
     quick_rotary_encoder->disableAcceleration();
 
-/*     menu_rotary_encoder.begin();
+    menu_rotary_encoder.begin();
     menu_rotary_encoder.setup(readEncoderISRMenu);
     menu_rotary_encoder.setBoundaries(0,size,true);
-    menu_rotary_encoder.disableAcceleration(); */
+    menu_rotary_encoder.disableAcceleration();
 
     xTaskCreatePinnedToCore(
-        quickRotaryTask,
-        "Quick Rotary Task",
-        1024,
-        NULL,
-        1,
-        &quick_rotary_task_handle,
-        app_cpu
-    );
-    vTaskSuspend(quick_rotary_task_handle);
-    vTaskResume(quick_rotary_task_handle);
-
-
-/*     xTaskCreatePinnedToCore(
-        menuRotaryTask,
-        "Menu Rotary Task",
-        1024,
-        NULL,
-        1,
-        &menu_rotary_task_handle,
-        app_cpu
-    );
-    vTaskSuspend(menu_rotary_task_handle);
-    vTaskResume(menu_rotary_task_handle); */
-
-/*     xTaskCreatePinnedToCore(
         menuDisplayTask,
         "Display Task",
         4096,
@@ -550,7 +503,7 @@ void setup() {
         1,
         &display_task_handle,
         app_cpu
-    ); */
+    );
 
     // ------------------------------------ GPIO INIT ------------------------------------------ //
     //Pin initialization for buttons
