@@ -10,10 +10,12 @@ const char* SSID = "Odyssey";
 const char* PASS = "Blue4524.";
 WifiParameters_t wifi_params = {SSID, PASS};
 
-const char* aliases[] = {
+char* aliases[] = {
   "Lauter",
   "Dejsa",
   "Ball"
 };
+
+const int size = sizeof(aliases)/sizeof(aliases[0]);
 
 #endif
