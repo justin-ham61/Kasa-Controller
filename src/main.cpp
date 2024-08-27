@@ -101,9 +101,7 @@ IRAM_ATTR void buttonHandle2(){
         return;
     } else {
         button_state_flag |= 2;
-        if(xTimerStartFromISR(xTimer, 0) != pdPASS){
-            return;
-        }
+        xTimerStart(xTimer, 0);
     }
 }
 IRAM_ATTR void buttonHandle3(){
@@ -175,12 +173,20 @@ void vIdleTimerCallback(TimerHandle_t xIdleTimer){
     xSemaphoreTake(wifiSemaphore, portMAX_DELAY);
     Serial.println("Disconnected WiFi and going to sleep");
     WiFi.disconnect();
+
+    gpio_wakeup_enable(GPIO_NUM_12, GPIO_INTR_HIGH_LEVEL);
     esp_sleep_enable_gpio_wakeup();
+
     display.clearDisplay();
     display.display();
-    vTaskDelay(100/portTICK_PERIOD_MS);
+
+
+    vTaskDelay(200/portTICK_PERIOD_MS);
     esp_light_sleep_start();
-    vTaskDelay(100/portTICK_PERIOD_MS);
+    vTaskDelay(200/portTICK_PERIOD_MS);
+
+    gpio_wakeup_disable(GPIO_NUM_12);
+    xTaskNotifyGive(display_task_handle);
     WiFi.reconnect();
 }
 
@@ -442,7 +448,7 @@ void setup() {
     //Rotary Timer
     xQuickRotaryTimer = xTimerCreate(
         "Quick Rotary Timer",
-        pdMS_TO_TICKS(1000),
+        pdMS_TO_TICKS(5000),
         pdFALSE,
         (void *)0,
         vQuickRotaryCallback
@@ -511,20 +517,16 @@ void setup() {
     pinMode(SW_2_PIN, INPUT_PULLDOWN);
     pinMode(SW_3_PIN, INPUT_PULLDOWN);
     pinMode(SW_4_PIN, INPUT_PULLDOWN);
-    pinMode(SW_5_PIN, INPUT_PULLDOWN);
+
     attachInterrupt(digitalPinToInterrupt(SW_1_PIN), buttonHandle1, RISING);
     attachInterrupt(digitalPinToInterrupt(SW_2_PIN), buttonHandle2, RISING);
     attachInterrupt(digitalPinToInterrupt(SW_3_PIN), buttonHandle3, RISING);
     attachInterrupt(digitalPinToInterrupt(SW_4_PIN), buttonHandle4, RISING);
-    attachInterrupt(digitalPinToInterrupt(SW_5_PIN), buttonHandle5, RISING);
+
 
     //Pin set up for sleep wake up
-    gpio_wakeup_enable(GPIO_NUM_25, GPIO_INTR_HIGH_LEVEL);
-    gpio_wakeup_enable(GPIO_NUM_26, GPIO_INTR_HIGH_LEVEL);
-    gpio_wakeup_enable(GPIO_NUM_27, GPIO_INTR_HIGH_LEVEL);
-    gpio_wakeup_enable(GPIO_NUM_14, GPIO_INTR_HIGH_LEVEL);
-    gpio_wakeup_enable(GPIO_NUM_12, GPIO_INTR_HIGH_LEVEL);
     xTimerStart(xIdleTimer, portMAX_DELAY);
+
 }
 
 void loop(){
