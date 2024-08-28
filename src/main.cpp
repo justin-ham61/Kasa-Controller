@@ -45,12 +45,18 @@ static QueueHandle_t toggle_queue;
 static const uint8_t max_brightness_queue_len = 5;
 static QueueHandle_t brightness_queue;
 
+static const uint8_t max_color_queue_len = 5;
+static QueueHandle_t color_queue;
+
+
 static const uint8_t max_menu_display_queue_len = 5;
 static QueueHandle_t menu_display_queue;
 
 //Debounce and Button Queue Timers
 TimerHandle_t xTimer;
 TimerHandle_t xQuickRotaryTimer;
+TimerHandle_t xModeSwitchTimer;
+TimerHandle_t xMenuRotarySwitchTimer;
 
 //Button Flag
 volatile uint8_t button_state_flag;
@@ -67,6 +73,9 @@ static TaskHandle_t toggle_bulb_task_handle = NULL;
 static TaskHandle_t quick_rotary_task_handle = NULL;
 static TaskHandle_t brightness_task_handle = NULL;
 static TaskHandle_t menu_rotary_task_handle = NULL;
+static TaskHandle_t brightness_display_task_handle = NULL;
+static TaskHandle_t individual_display_task_handle = NULL;
+static TaskHandle_t color_task_handle = NULL;
 
 //Sleep Handles
 TimerHandle_t xIdleTimer;
@@ -86,7 +95,10 @@ uint8_t device_mode = 0b00000001;
 //Display config
 #define OLED_ADDR 0x3C
 Adafruit_SSD1306 display(128, 64, &Wire, -1);
-menu_item menuItems[size + 1];
+menu_item menuItems[size + 6];
+
+//Task Params
+int all_brightness = 0;
 
 IRAM_ATTR void buttonHandle1(){
     if(button_state_flag & 1){
@@ -138,30 +150,53 @@ IRAM_ATTR void readEncoderISRQuick(){
     quick_rotary_encoder->readEncoder_ISR();
     xTimerStartFromISR(xQuickRotaryTimer, 0);
     xTimerStartFromISR(xIdleTimer, 0);
+    xTimerStartFromISR(xModeSwitchTimer, 0);
+    xTaskNotifyGive(brightness_display_task_handle);
 }
+
 IRAM_ATTR void readEncoderISRMenu(){
     menu_rotary_encoder.readEncoder_ISR();
-    xTaskNotifyGive(display_task_handle);
-    xTimerStartFromISR(xIdleTimer, 0);
+    if(device_mode & 1){
+        xTaskNotifyGive(display_task_handle);
+        xTimerStartFromISR(xIdleTimer, 0);
+    }
+}
+IRAM_ATTR void menuRotaryHandle(){
+    xTimerStart(xMenuRotarySwitchTimer, 0);
 }
 
 // Handles buttons based on current context and adds the command to the queue
 // Button presses should get translated to toggle or color based on what the current mode is 
 void vButtonTimerCallback(TimerHandle_t xTimer){
-        command new_command;
+    command new_command; 
+    if(device_mode & 1){
         for(int i = 0; i < 5; i++){
             uint8_t curr_bitmask = 1 << i;
             if (button_state_flag & curr_bitmask){
                 button_state_flag &= ~(1 << i);
                 new_command.index = i;
-                new_command.task = 0;
                 new_command.value = 0;
-                bulb_state_flag ^= curr_bitmask;
-                if(xQueueSend(command_queue, (void *)&new_command, 10) != pdTRUE){
-                    Serial.println("Queue Full");
-                }
+                new_command.task = 0;
             }
-        }   
+            if(xQueueSend(command_queue, (void *)&new_command, 10) != pdTRUE){
+                Serial.println("Queue Full");
+            }
+        }
+    } else if (device_mode & 4){
+        new_command.task = 3;
+        new_command.index = menu_rotary_encoder.readEncoder();
+        for(int i = 0; i < 5; i++){
+            uint8_t curr_bitmask = 1 << i;
+            if(button_state_flag & curr_bitmask){
+                button_state_flag &= ~curr_bitmask;
+                new_command.value = i;
+            }
+        }
+        if(xQueueSend(command_queue, (void *)&new_command, 10) != pdTRUE){
+            Serial.println("Queue Full");
+        }
+        //Insert code for sending color change commands
+    }
     if(xTimerStart(xIdleTimer, portMAX_DELAY) != pdTRUE){
         Serial.println("Failed to start idle timer");
     }
@@ -181,10 +216,11 @@ void vIdleTimerCallback(TimerHandle_t xIdleTimer){
     display.display();
 
 
-    vTaskDelay(200/portTICK_PERIOD_MS);
+    vTaskDelay(100/portTICK_PERIOD_MS);
     esp_light_sleep_start();
     vTaskDelay(200/portTICK_PERIOD_MS);
 
+    xTimerStart(xIdleTimer, 0);
     gpio_wakeup_disable(GPIO_NUM_12);
     xTaskNotifyGive(display_task_handle);
     WiFi.reconnect();
@@ -195,11 +231,49 @@ void vQuickRotaryCallback(TimerHandle_t xQuickRotaryTimer){
     command new_command;
     new_command.task = 1;
     new_command.value = quick_number_selector.getValue();
-    for(int i = 0; i < numberOfBulbs; i++){
-        new_command.index = i;
+    if(device_mode & 1){
+        for(int i = 0; i < numberOfBulbs; i++){
+            new_command.index = i;
+            if(xQueueSend(command_queue, (void *)&new_command, 10) != pdTRUE){
+                Serial.println("Queue is Full");
+            }
+        }
+    } else if (device_mode & 4){
+        Serial.println("Sending");
+        new_command.index = menu_rotary_encoder.readEncoder();
         if(xQueueSend(command_queue, (void *)&new_command, 10) != pdTRUE){
             Serial.println("Queue is Full");
         }
+    }
+}
+
+void vModeSwitchCallback(TimerHandle_t xModeSwitchTimer){
+    device_mode = 1;
+    xTaskNotifyGive(display_task_handle);
+}
+
+void vMenuSwitchCallback(TimerHandle_t xMenuRotarySwitchTimer){
+    int menu_index = menu_rotary_encoder.readEncoder();
+    int curr_type = menuItems[menu_index].type;
+
+    //Handles if button press is trying to select a bulb
+    if(curr_type == 0){
+        device_mode = 4;
+        xTaskNotifyGive(individual_display_task_handle);
+
+    //Handles if button press is activating a preset
+    } else if (curr_type == 1){
+        command color_command;
+        color_command.task = 3;
+        color_command.value = menu_index - numberOfBulbs;
+        for(int i = 0; i < numberOfBulbs; i++){
+            color_command.index = i;
+            if(xQueueSend(command_queue, (void *)&color_command, 10) != pdTRUE){
+                Serial.println("Queue Full");
+            }
+        }
+    } else if (curr_type == 2){
+        esp_restart();
     }
 }
 
@@ -223,6 +297,9 @@ void readCommandTask(void *parameter){
                         Serial.println("Temperature Control");
                         break;
                     case 3: 
+                        if(xQueueSend(color_queue, (void *)&curr_command, 10) != pdTRUE){
+                            Serial.println("Color queue is full");
+                        }
                         Serial.println("Color Control");
                         break;
                 }
@@ -267,6 +344,18 @@ void brightnessTask(void *parameter){
     }
 }
 
+void colorTask(void *parameter){
+    command color_command;
+    while(1){
+        if(xQueueReceive(color_queue, (void *)&color_command, portMAX_DELAY) == pdTRUE){
+            xSemaphoreTake(wifiSemaphore, portMAX_DELAY);
+            currentBulb = static_cast<KASASmartBulb*>(kasaUtil.GetSmartPlugByIndex(color_command.index));
+            currentBulb->setColor(color_command.value);
+            xSemaphoreGive(wifiSemaphore);
+        }
+    }
+}
+
 void menuDisplayTask(void *parameter){
     int currItem;
     int previousItem;
@@ -278,10 +367,10 @@ void menuDisplayTask(void *parameter){
         currItem = menu_rotary_encoder.readEncoder();
         previousItem = currItem - 1;
         if(previousItem < 0){
-            previousItem = numberOfBulbs;
+            previousItem = numberOfBulbs + 5;
         }
         nextItem = currItem + 1;
-        if(nextItem >= numberOfBulbs + 1){
+        if(nextItem >= numberOfBulbs + 6){
             nextItem = 0;
         }
 
@@ -312,9 +401,44 @@ void menuDisplayTask(void *parameter){
         display.print(menuItems[nextItem].name);
 
         //Scroll position box
-        display.fillRect(125, (64/(numberOfBulbs + 1)) * currItem, 3, (64/(numberOfBulbs + 1)), WHITE);
+        display.fillRect(125, (64/(numberOfBulbs + 6)) * currItem, 3, (64/(numberOfBulbs + 6)), WHITE);
 
         //Display
+        display.display();
+    }
+}
+
+void brightnessDisplayTask(void *parameter){
+    while(1){
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        int brightness = quick_number_selector.getValue();
+        display.clearDisplay();
+        display.setFont();
+        display.setCursor(20, 20);
+        display.print("Brightness: ");
+        display.print(brightness);
+        display.print("%");
+        int barWidth = map(brightness, 0, 100, 0, 100);
+        display.drawRect(14, 40, 100, 10, WHITE); // Draw the outline of the bar
+        display.fillRect(14, 40, barWidth, 10, WHITE); // Fill the bar according to currBrightness
+        display.display();
+    }
+}
+
+void individualBulbDisplayTask(void *parameter){
+    while(1){
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        xTimerStart(xModeSwitchTimer, 0);
+        int brightness = quick_number_selector.getValue();
+        display.clearDisplay();
+        display.setFont();
+        display.setCursor(20, 20);
+        display.print("Brightness: ");
+        display.print(brightness);
+        display.print("%");
+        int barWidth = map(brightness, 0, 100, 0, 100);
+        display.drawRect(14, 40, 100, 10, WHITE); // Draw the outline of the bar
+        display.fillRect(14, 40, barWidth, 10, WHITE); // Fill the bar according to currBrightness
         display.display();
     }
 }
@@ -365,14 +489,22 @@ void addDevices(void *parameter){
         numberOfBulbs = kasaUtil.ScanDevicesAndAdd(1000, aliases, size);
         for(int i = 0; i < numberOfBulbs; i++){
             Serial.println(kasaUtil.GetSmartPlugByIndex(i)->alias);
-            menuItems[i] = {kasaUtil.GetSmartPlugByIndex(i)->alias, 1};
+            menuItems[i] = {kasaUtil.GetSmartPlugByIndex(i)->alias, 1, 0};
         }
-        menuItems[numberOfBulbs] = {"Reset", 3};
+        menuItems[numberOfBulbs] = {"White", 1, 1};
+        menuItems[numberOfBulbs + 1] = {"Blue", 1, 1};
+        menuItems[numberOfBulbs + 2] = {"Red", 1, 1};
+        menuItems[numberOfBulbs + 3] = {"Green", 1, 1};
+        menuItems[numberOfBulbs + 4] = {"Purple", 1, 1};
+        menuItems[numberOfBulbs + 5] = {"Reset", 3, 2};
+
         xTaskNotifyGive(display_task_handle);
         xSemaphoreGive(wifiSemaphore);
         vTaskSuspend(NULL);
     }
 }
+
+
 
 void setup() {
     Serial.begin(115200);
@@ -418,7 +550,9 @@ void setup() {
     command_queue = xQueueCreate(max_command_queue_len, sizeof(command));
     toggle_queue = xQueueCreate(max_toggle_queue_len, sizeof(command));
     brightness_queue = xQueueCreate(max_brightness_queue_len, sizeof(command));
+    color_queue = xQueueCreate(max_color_queue_len, sizeof(command));
     menu_display_queue = xQueueCreate(max_menu_display_queue_len, sizeof(int));
+
 
     // ------------------------------------ TIMER INIT ------------------------------------------ //
     //Debounce & Button Timer 
@@ -448,7 +582,7 @@ void setup() {
     //Rotary Timer
     xQuickRotaryTimer = xTimerCreate(
         "Quick Rotary Timer",
-        pdMS_TO_TICKS(5000),
+        pdMS_TO_TICKS(1000),
         pdFALSE,
         (void *)0,
         vQuickRotaryCallback
@@ -456,6 +590,24 @@ void setup() {
     if(xQuickRotaryTimer == NULL){
         Serial.println("Was not able to initialize quick rotary timer");
     }
+
+    //Display Mode Switch Timer
+    xModeSwitchTimer = xTimerCreate(
+        "Mode Switch Timer",
+        pdMS_TO_TICKS(3000),
+        pdFALSE,
+        (void *)0,
+        vModeSwitchCallback
+    );
+
+    xMenuRotarySwitchTimer = xTimerCreate(
+        "Menu Switch Timer",
+        pdMS_TO_TICKS(50),
+        pdFALSE,
+        (void *)0,
+        vMenuSwitchCallback
+    );
+
     
     // ------------------------------------ RUNTIME TASK INIT ------------------------------------------ //
     //Command Read Task Initialization
@@ -478,6 +630,7 @@ void setup() {
         &toggle_bulb_task_handle,
         app_cpu
     );
+
     xTaskCreatePinnedToCore(
         brightnessTask,
         "Brightness Task",
@@ -485,6 +638,16 @@ void setup() {
         NULL,
         2,
         &brightness_task_handle,
+        app_cpu
+    );
+
+    xTaskCreatePinnedToCore(
+        colorTask,
+        "Color Task",
+        2048,
+        NULL,
+        2,
+        &color_task_handle,
         app_cpu
     );
     
@@ -498,16 +661,36 @@ void setup() {
 
     menu_rotary_encoder.begin();
     menu_rotary_encoder.setup(readEncoderISRMenu);
-    menu_rotary_encoder.setBoundaries(0,size,true);
+    menu_rotary_encoder.setBoundaries(0,size + 5,true);
     menu_rotary_encoder.disableAcceleration();
 
     xTaskCreatePinnedToCore(
         menuDisplayTask,
-        "Display Task",
+        "Menu Display Task",
         4096,
         NULL,
         1,
         &display_task_handle,
+        app_cpu
+    );
+
+    xTaskCreatePinnedToCore(
+        brightnessDisplayTask,
+        "Brightness Display Task",
+        4096,
+        &all_brightness,
+        1,
+        &brightness_display_task_handle,
+        app_cpu
+    );
+
+    xTaskCreatePinnedToCore(
+        individualBulbDisplayTask,
+        "Individual Bulb Display Task",
+        4096,
+        NULL,
+        1,
+        &individual_display_task_handle,
         app_cpu
     );
 
@@ -522,6 +705,9 @@ void setup() {
     attachInterrupt(digitalPinToInterrupt(SW_2_PIN), buttonHandle2, RISING);
     attachInterrupt(digitalPinToInterrupt(SW_3_PIN), buttonHandle3, RISING);
     attachInterrupt(digitalPinToInterrupt(SW_4_PIN), buttonHandle4, RISING);
+
+    pinMode(MENU_ROTARY_SW, INPUT_PULLDOWN);
+    attachInterrupt(digitalPinToInterrupt(MENU_ROTARY_SW), menuRotaryHandle, RISING);
 
 
     //Pin set up for sleep wake up

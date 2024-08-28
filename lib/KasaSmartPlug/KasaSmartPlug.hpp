@@ -150,6 +150,7 @@ class KASASmartBulb: public KASADevice{
     void turnOff();
     void toggle();
     void setBrightness(const int brightness);
+    void setColor(const int colorCode);
 
     KASASmartBulb(const char *name, const char *ip, int brightness, int temp)
         :KASADevice(name, ip), brightness(brightness), temp(temp){}
@@ -210,6 +211,7 @@ public:
     static const char *light_off;
     static const char* set_brightness;
     static const char* set_temperature;
+    static const char* set_color[5];
     static const char* query_end;
 
     int ScanDevicesAndAdd(int timeoutMs, char* arr[], const int size);

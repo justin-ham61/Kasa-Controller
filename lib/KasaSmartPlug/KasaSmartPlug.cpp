@@ -14,6 +14,18 @@ const char *KASAUtil::light_on = "{\"smartlife.iot.smartbulb.lightingservice\": 
 const char *KASAUtil::light_off = "{\"smartlife.iot.smartbulb.lightingservice\": {\"transition_light_state\": {\"on_off\": 0}}}";
 const char *KASAUtil::set_brightness = "{\"smartlife.iot.smartbulb.lightingservice\": {\"transition_light_state\": {\"brightness\": ";
 const char *KASAUtil::set_temperature = "{\"smartlife.iot.smartbulb.lightingservice\": {\"transition_light_state\": {\"color_temp\": ";
+const char *KASAUtil::set_color[5] = {
+    //White
+    "{\"smartlife.iot.smartbulb.lightingservice\": {\"transition_light_state\": {\"hue\": 0, \"saturation\": 0, \"color_temp\": 2700}}}",
+    //Blue
+    "{\"smartlife.iot.smartbulb.lightingservice\": {\"transition_light_state\": {\"hue\": 240, \"saturation\": 100, \"color_temp\": 0}}}",
+    //Red
+    "{\"smartlife.iot.smartbulb.lightingservice\": {\"transition_light_state\": {\"hue\": 0, \"saturation\": 100, \"color_temp\": 0}}}",
+    //Green
+    "{\"smartlife.iot.smartbulb.lightingservice\": {\"transition_light_state\": {\"hue\": 120, \"saturation\": 100, \"color_temp\": 0}}}",
+    //Purple
+    "{\"smartlife.iot.smartbulb.lightingservice\": {\"transition_light_state\": {\"hue\": 270, \"saturation\": 100, \"color_temp\": 0}}}"
+};
 const char *KASAUtil::query_end = "}}}";
 static const char *TAG = "KasaSmartPlug";
 
@@ -387,7 +399,7 @@ KASADevice *KASAUtil::GetSmartPlug(const char *alias_name)
 void KASADevice::SendCommand(const char *cmd)
 {
     int err;
-    char sendbuf[128];
+    char sendbuf[256];
     xSemaphoreTake(mutex, portMAX_DELAY);
     OpenSock();
     int len = KASAUtil::Encrypt(cmd, strlen(cmd), 1, sendbuf);
@@ -545,6 +557,11 @@ void KASASmartBulb::setBrightness(const int brightness){
     strcat(result, KASAUtil::query_end);
 
     SendCommand(result);
+}
+
+void KASASmartBulb::setColor(const int colorCode){
+    Serial.println(KASAUtil::set_color[colorCode]);
+    SendCommand(KASAUtil::set_color[colorCode]);
 }
 
 void KASASmartBulb::toggle(){
