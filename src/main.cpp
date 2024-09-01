@@ -21,6 +21,7 @@
 #include <Wire.h>
 #include <Fonts/FreeSans9pt7b.h>
 #include <Fonts/FreeSansBold9pt7b.h>
+#include <EEPROM.h>
 
 #if CONFIG_FREERTOS_UNICORE
 static const BaseType_t app_cpu = 0;
@@ -76,6 +77,7 @@ static TaskHandle_t menu_rotary_task_handle = NULL;
 static TaskHandle_t brightness_display_task_handle = NULL;
 static TaskHandle_t individual_display_task_handle = NULL;
 static TaskHandle_t color_task_handle = NULL;
+static TaskHandle_t update_flash_task_handle = NULL;
 
 //Sleep Handles
 TimerHandle_t xIdleTimer;
@@ -95,7 +97,7 @@ uint8_t device_mode = 0b00000001;
 //Display config
 #define OLED_ADDR 0x3C
 Adafruit_SSD1306 display(128, 64, &Wire, -1);
-menu_item menuItems[size + 6];
+menu_item menuItems[12];
 
 //Task Params
 int all_brightness = 0;
@@ -161,6 +163,7 @@ IRAM_ATTR void readEncoderISRMenu(){
         xTimerStartFromISR(xIdleTimer, 0);
     }
 }
+
 IRAM_ATTR void menuRotaryHandle(){
     xTimerStart(xMenuRotarySwitchTimer, 0);
 }
@@ -177,9 +180,9 @@ void vButtonTimerCallback(TimerHandle_t xTimer){
                 new_command.index = i;
                 new_command.value = 0;
                 new_command.task = 0;
-            }
-            if(xQueueSend(command_queue, (void *)&new_command, 10) != pdTRUE){
-                Serial.println("Queue Full");
+                if(xQueueSend(command_queue, (void *)&new_command, 10) != pdTRUE){
+                    Serial.println("Queue Full");
+                }
             }
         }
     } else if (device_mode & 4){
@@ -260,7 +263,6 @@ void vMenuSwitchCallback(TimerHandle_t xMenuRotarySwitchTimer){
     if(curr_type == 0){
         device_mode = 4;
         xTaskNotifyGive(individual_display_task_handle);
-
     //Handles if button press is activating a preset
     } else if (curr_type == 1){
         command color_command;
@@ -272,9 +274,17 @@ void vMenuSwitchCallback(TimerHandle_t xMenuRotarySwitchTimer){
                 Serial.println("Queue Full");
             }
         }
+    //Handles if button press is resetting device
     } else if (curr_type == 2){
+        Serial.println("reset");
         esp_restart();
+    //Handles if button press is saving bulb configuration
+    } else if (curr_type == 3){
+        Serial.println("Save");
+        xTaskNotifyGive(update_flash_task_handle);
     }
+
+    xTimerStart(xIdleTimer, 0);
 }
 
 void readCommandTask(void *parameter){
@@ -367,10 +377,10 @@ void menuDisplayTask(void *parameter){
         currItem = menu_rotary_encoder.readEncoder();
         previousItem = currItem - 1;
         if(previousItem < 0){
-            previousItem = numberOfBulbs + 5;
+            previousItem = numberOfBulbs + 6;
         }
         nextItem = currItem + 1;
-        if(nextItem >= numberOfBulbs + 6){
+        if(nextItem >= numberOfBulbs + 7){
             nextItem = 0;
         }
 
@@ -401,7 +411,7 @@ void menuDisplayTask(void *parameter){
         display.print(menuItems[nextItem].name);
 
         //Scroll position box
-        display.fillRect(125, (64/(numberOfBulbs + 6)) * currItem, 3, (64/(numberOfBulbs + 6)), WHITE);
+        display.fillRect(125, (64/(numberOfBulbs + 7)) * currItem, 3, (64/(numberOfBulbs + 7)), WHITE);
 
         //Display
         display.display();
@@ -482,21 +492,127 @@ void connectToWifi(void *parameter){
         vTaskDelete(NULL); 
     }
 }
+void loadDevicesFromMemory(){
+    int read_index = EEPROM.read(1);
+    int data_len = EEPROM.read(2);
+    int currData;
+    char alias[10];
+    char ip[20];
+    while(1){
+        int alias_len = EEPROM.read(read_index);
 
-void addDevices(void *parameter){
+        if(alias_len == 255){
+            break;
+        }
+
+        read_index++;
+        if(read_index >= 256){
+            read_index = 3;
+        }
+
+        for(int i = 0; i < alias_len; i++){
+            alias[i] = char(EEPROM.read(read_index));
+            read_index++;
+            if(read_index >= 256){
+                read_index = 3;
+            }
+        }
+        int ip_len = EEPROM.read(read_index);
+        for(int i = 0; i < ip_len; i++){
+            ip[i] = char(EEPROM.read(read_index));
+            read_index++;
+            if(read_index >= 256){
+                read_index = 3;
+            }
+        }
+        Serial.println(alias);
+        Serial.println(ip);
+    }   
+
+
+
+/*     for(int i = 0; i < data_len; i++){
+        read_index = i + startRead;
+        if(read_index >= 256){
+            read_index -= 253;
+        }
+        Serial.print(EEPROM.read(read_index));
+        Serial.print(" ");
+    } */
+}
+int addDevices(void *parameter){
     while(1){
         xSemaphoreTake(wifiSemaphore, portMAX_DELAY);
+        int read_index = EEPROM.read(1);
+        int data_len = EEPROM.read(2);
+        int alias_len = EEPROM.read(read_index);
+
+        while(alias_len != 255){
+            char alias[10];
+            char ip[20];
+
+            read_index++;
+            if(read_index >= 256){
+                read_index = 3;
+            }
+
+            for(int i = 0; i < alias_len; i++){
+                alias[i] = char(EEPROM.read(read_index));
+                read_index++;
+                if(read_index >= 256){
+                    read_index = 3;
+                }
+            }
+            alias[alias_len] = '\0';
+
+            int ip_len = EEPROM.read(read_index);
+            read_index++;
+            if(read_index >= 256){
+                read_index = 3;
+            }
+
+            for(int i = 0; i < ip_len; i++){
+                ip[i] = char(EEPROM.read(read_index));
+                read_index++;
+                if(read_index >= 256){
+                    read_index = 3;
+                }
+            }
+            ip[ip_len] = '\0';
+        
+            Serial.println(alias);
+            Serial.println(ip);
+
+            const char *alias_ptr = alias;
+            const char *ip_ptr = ip;
+
+            kasaUtil.CreateDevice(alias, ip, "bulb");
+
+            Serial.print("Added from memory: ");
+            Serial.println(alias);
+
+            memset(alias, 0, sizeof(alias));
+            memset(ip, 0, sizeof(ip));
+
+            alias_len = EEPROM.read(read_index);
+        } 
+
+ 
+
+        //Load devices from back up first, then scan for new devices or IP address update
         numberOfBulbs = kasaUtil.ScanDevicesAndAdd(1000, aliases, size);
         for(int i = 0; i < numberOfBulbs; i++){
             Serial.println(kasaUtil.GetSmartPlugByIndex(i)->alias);
             menuItems[i] = {kasaUtil.GetSmartPlugByIndex(i)->alias, 1, 0};
         }
+        
         menuItems[numberOfBulbs] = {"White", 1, 1};
         menuItems[numberOfBulbs + 1] = {"Blue", 1, 1};
         menuItems[numberOfBulbs + 2] = {"Red", 1, 1};
         menuItems[numberOfBulbs + 3] = {"Green", 1, 1};
         menuItems[numberOfBulbs + 4] = {"Purple", 1, 1};
         menuItems[numberOfBulbs + 5] = {"Reset", 3, 2};
+        menuItems[numberOfBulbs + 6] = {"Save", 3, 3};
 
         xTaskNotifyGive(display_task_handle);
         xSemaphoreGive(wifiSemaphore);
@@ -504,13 +620,79 @@ void addDevices(void *parameter){
     }
 }
 
+//memory buffer layout
+//length of alias -> alias
+//length of ip -> ip
+//end = demark
+
+void updateFlash(void *parameter){
+    while(1){
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        Serial.println("notified");
+        uint8_t memory_buffer[256];
+        int index = 0;
+        for(int i = 0; i < numberOfBulbs; i++){
+            KASASmartBulb* bulb = static_cast<KASASmartBulb*>(kasaUtil.GetSmartPlugByIndex(i));
+            uint8_t alias_len = static_cast<int>(strlen(bulb->alias));
+            memory_buffer[index] = alias_len;
+            index++;
+            for(int j = 0; j < alias_len; j++){
+                memory_buffer[index] = bulb->alias[j];
+                index++;
+            }
+            uint8_t ip_len = static_cast<int>(strlen(bulb->ip_address));
+            memory_buffer[index] = ip_len;
+            index++;
+            for(int j = 0; j < ip_len; j++){
+                memory_buffer[index] = bulb->ip_address[j];
+                index++;
+            }
+        }
+        memory_buffer[index] = 255;
+        index++;
+
+        //Initializes the begin index for EEPROM memory
+        int begin = EEPROM.read(0);
+
+        //Saves where the program should read from after this write
+        if(begin == 256 - 3){
+            EEPROM.write(1, 2);
+        } else {
+            EEPROM.write(1, begin + 3);
+        }
+
+        //Saves length of new data
+        EEPROM.write(2, index);
+
+
+        for(int i = 0; i < index; i++){
+            if(begin >= 256 - 3){
+                begin = 0;
+            }
+            EEPROM.write(begin + 3, static_cast<int>(memory_buffer[i]));
+            begin++;
+        }
+
+        Serial.println();
+
+        //Write the next begin index into flash
+        EEPROM.write(0, begin);
+        EEPROM.commit();
+    }
+}
 
 
 void setup() {
     Serial.begin(115200);
     vTaskDelay(200/portTICK_PERIOD_MS);
-
     // ------------------------------------ WIFI TASK INIT ------------------------------------------ //
+
+    if (!EEPROM.begin(256)) {
+        Serial.println("Failed to initialise EEPROM");
+        return;
+    }
+
+
     wifiSemaphore = xSemaphoreCreateBinary();
     if(wifiSemaphore == NULL){
         Serial.println("Unable to create wifi semaphore");
@@ -519,14 +701,13 @@ void setup() {
         xSemaphoreGive(wifiSemaphore);
     }
 
-    xTaskCreatePinnedToCore(
+    xTaskCreate(
         connectToWifi, 
         "Wifi Task",
         4096,
         &wifi_params, 
         4,
-        &wifi_task_handle,
-        app_cpu
+        &wifi_task_handle
     );
 
     display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR);
@@ -536,14 +717,13 @@ void setup() {
     display.display(); // Display the message
     display.clearDisplay();
     // ------------------------------------ KASA BULB INIT ------------------------------------------ //
-    xTaskCreatePinnedToCore(
+    xTaskCreate(
         addDevices,
         "Device Task",
         10000,
         NULL,
         3,
-        &device_discover_task_handle,
-        app_cpu
+        &device_discover_task_handle
     );
 
     //Command Queue Intialization
@@ -611,44 +791,40 @@ void setup() {
     
     // ------------------------------------ RUNTIME TASK INIT ------------------------------------------ //
     //Command Read Task Initialization
-    xTaskCreatePinnedToCore(
+    xTaskCreate(
         readCommandTask, 
         "Command Task",
         2048,
         NULL, 
         2,
-        &command_read_task_handle,
-        app_cpu
+        &command_read_task_handle
     );
 
-    xTaskCreatePinnedToCore(
+    xTaskCreate(
         toggleTask,
         "Toggle Task", 
         2048, 
         NULL,
         2,
-        &toggle_bulb_task_handle,
-        app_cpu
+        &toggle_bulb_task_handle
     );
 
-    xTaskCreatePinnedToCore(
+    xTaskCreate(
         brightnessTask,
         "Brightness Task",
         2048,
         NULL,
         2,
-        &brightness_task_handle,
-        app_cpu
+        &brightness_task_handle
     );
 
-    xTaskCreatePinnedToCore(
+    xTaskCreate(
         colorTask,
         "Color Task",
         2048,
         NULL,
         2,
-        &color_task_handle,
-        app_cpu
+        &color_task_handle
     );
     
     //Rotary Encoder Set up
@@ -661,37 +837,43 @@ void setup() {
 
     menu_rotary_encoder.begin();
     menu_rotary_encoder.setup(readEncoderISRMenu);
-    menu_rotary_encoder.setBoundaries(0,size + 5,true);
+    menu_rotary_encoder.setBoundaries(0,size + 6,true);
     menu_rotary_encoder.disableAcceleration();
 
-    xTaskCreatePinnedToCore(
+    xTaskCreate(
         menuDisplayTask,
         "Menu Display Task",
         4096,
         NULL,
         1,
-        &display_task_handle,
-        app_cpu
+        &display_task_handle
     );
 
-    xTaskCreatePinnedToCore(
+    xTaskCreate(
         brightnessDisplayTask,
         "Brightness Display Task",
         4096,
         &all_brightness,
         1,
-        &brightness_display_task_handle,
-        app_cpu
+        &brightness_display_task_handle
     );
 
-    xTaskCreatePinnedToCore(
+    xTaskCreate(
         individualBulbDisplayTask,
         "Individual Bulb Display Task",
         4096,
         NULL,
         1,
-        &individual_display_task_handle,
-        app_cpu
+        &individual_display_task_handle
+    );
+
+    xTaskCreate(
+        updateFlash,
+        "Update Flash",
+        4096,
+        NULL, 
+        1, 
+        &update_flash_task_handle
     );
 
     // ------------------------------------ GPIO INIT ------------------------------------------ //
@@ -700,11 +882,13 @@ void setup() {
     pinMode(SW_2_PIN, INPUT_PULLDOWN);
     pinMode(SW_3_PIN, INPUT_PULLDOWN);
     pinMode(SW_4_PIN, INPUT_PULLDOWN);
+    pinMode(SW_5_PIN, INPUT_PULLDOWN);
 
     attachInterrupt(digitalPinToInterrupt(SW_1_PIN), buttonHandle1, RISING);
     attachInterrupt(digitalPinToInterrupt(SW_2_PIN), buttonHandle2, RISING);
     attachInterrupt(digitalPinToInterrupt(SW_3_PIN), buttonHandle3, RISING);
     attachInterrupt(digitalPinToInterrupt(SW_4_PIN), buttonHandle4, RISING);
+    attachInterrupt(digitalPinToInterrupt(SW_5_PIN), buttonHandle5, RISING);
 
     pinMode(MENU_ROTARY_SW, INPUT_PULLDOWN);
     attachInterrupt(digitalPinToInterrupt(MENU_ROTARY_SW), menuRotaryHandle, RISING);
