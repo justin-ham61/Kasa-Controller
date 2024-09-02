@@ -540,7 +540,7 @@ void loadDevicesFromMemory(){
         Serial.print(" ");
     } */
 }
-int addDevices(void *parameter){
+void addDevices(void *parameter){
     while(1){
         xSemaphoreTake(wifiSemaphore, portMAX_DELAY);
         int read_index = EEPROM.read(1);

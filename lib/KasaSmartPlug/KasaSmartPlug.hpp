@@ -226,6 +226,24 @@ public:
     KASAUtil();
 };
 
+class Credentials{
+    private:
+    const char* user;
+    const char* pass;
+    const char* auth_hash;
+    const char* owner_hash;
+    const char* dejsa_url = "http://10.0.0.97:9999/app/handshake1";
+    const char* strip_url = "http://10.0.0.138:9999/app/handshake1";
+    public:
+    
+    void handshake1()
+    {
+        uint8_t local_seed[16];
+        
 
+    }
+
+
+};
 
 #endif
