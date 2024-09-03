@@ -58,6 +58,7 @@ TimerHandle_t xTimer;
 TimerHandle_t xQuickRotaryTimer;
 TimerHandle_t xModeSwitchTimer;
 TimerHandle_t xMenuRotarySwitchTimer;
+TimerHandle_t xQuickRotarySwitchTimer;
 
 //Button Flag
 volatile uint8_t button_state_flag;
@@ -89,6 +90,7 @@ SemaphoreHandle_t wifiSemaphore;
 //Bulbs
 KASAUtil kasaUtil;
 KASASmartBulb* currentBulb;
+KASASmartStrip* currentStrip;
 int numberOfBulbs;
 
 //DeviceMode
@@ -166,6 +168,10 @@ IRAM_ATTR void readEncoderISRMenu(){
 
 IRAM_ATTR void menuRotaryHandle(){
     xTimerStart(xMenuRotarySwitchTimer, 0);
+}
+
+IRAM_ATTR void quickRotaryHandle(){
+    
 }
 
 // Handles buttons based on current context and adds the command to the queue
@@ -310,7 +316,7 @@ void readCommandTask(void *parameter){
                         if(xQueueSend(color_queue, (void *)&curr_command, 10) != pdTRUE){
                             Serial.println("Color queue is full");
                         }
-                        Serial.println("Color Control");
+
                         break;
                 }
             } else {
@@ -325,15 +331,15 @@ void toggleTask(void *parameter){
     while(1){
         if(xQueueReceive(toggle_queue, (void *)&toggle_command, portMAX_DELAY) == pdTRUE){
             xSemaphoreTake(wifiSemaphore, portMAX_DELAY);
-            currentBulb = static_cast<KASASmartBulb*>(kasaUtil.GetSmartPlugByIndex(toggle_command.index));
-            if(currentBulb->state == 0){
-                currentBulb->turnOn();
+            KASADevice* dev = kasaUtil.GetSmartPlugByIndex(toggle_command.index);
+            if(dev->state == 0){
+                dev->turnOn();
                 menuItems[toggle_command.index].icon = 1;
             } else {
-                currentBulb->turnOff();
+                dev->turnOff();
                 menuItems[toggle_command.index].icon = 0;
             }
-            if(currentBulb->err_code == 1){
+            if(dev->err_code == 1){
                 menuItems[toggle_command.index].icon = 2;
             }
             xTaskNotifyGive(display_task_handle);
@@ -347,8 +353,8 @@ void brightnessTask(void *parameter){
     while(1){
         if(xQueueReceive(brightness_queue, (void *)&brightness_command, portMAX_DELAY) == pdTRUE){
             xSemaphoreTake(wifiSemaphore, portMAX_DELAY);
-            currentBulb = static_cast<KASASmartBulb*>(kasaUtil.GetSmartPlugByIndex(brightness_command.index));
-            currentBulb->setBrightness(brightness_command.value);
+            KASADevice* dev = kasaUtil.GetSmartPlugByIndex(brightness_command.index);
+            dev->setBrightness(brightness_command.value);
             xSemaphoreGive(wifiSemaphore);
         }
     }
@@ -359,8 +365,8 @@ void colorTask(void *parameter){
     while(1){
         if(xQueueReceive(color_queue, (void *)&color_command, portMAX_DELAY) == pdTRUE){
             xSemaphoreTake(wifiSemaphore, portMAX_DELAY);
-            currentBulb = static_cast<KASASmartBulb*>(kasaUtil.GetSmartPlugByIndex(color_command.index));
-            currentBulb->setColor(color_command.value);
+            KASADevice* dev = kasaUtil.GetSmartPlugByIndex(color_command.index);
+            dev->setColor(color_command.value);
             xSemaphoreGive(wifiSemaphore);
         }
     }
@@ -788,6 +794,14 @@ void setup() {
         vMenuSwitchCallback
     );
 
+    xQuickRotarySwitchTimer = xTimerCreate(
+    "Quick Switch Timer",
+        pdMS_TO_TICKS(50),
+        pdFALSE,
+        (void *)0,
+        vMenuSwitchCallback
+    );
+
     
     // ------------------------------------ RUNTIME TASK INIT ------------------------------------------ //
     //Command Read Task Initialization
@@ -891,6 +905,8 @@ void setup() {
     attachInterrupt(digitalPinToInterrupt(SW_5_PIN), buttonHandle5, RISING);
 
     pinMode(MENU_ROTARY_SW, INPUT_PULLDOWN);
+    pinMode(QUICK_ROTARY_SW, INPUT_PULLDOWN);
+    attachInterrupt(digitalPinToInterrupt(QUICK_ROTARY_SW), quickRotaryHandle, RISING);
     attachInterrupt(digitalPinToInterrupt(MENU_ROTARY_SW), menuRotaryHandle, RISING);
 
 

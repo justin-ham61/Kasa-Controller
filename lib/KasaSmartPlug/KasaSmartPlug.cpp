@@ -7,6 +7,7 @@
 #include <string>
 #include <set>
 
+
 const char *KASAUtil::get_kasa_info = "{\"system\":{\"get_sysinfo\":null}}";
 const char *KASAUtil::relay_on = "{\"system\":{\"set_relay_state\":{\"state\":1}}}";
 const char *KASAUtil::relay_off = "{\"system\":{\"set_relay_state\":{\"state\":0}}}";
@@ -14,9 +15,13 @@ const char *KASAUtil::light_on = "{\"smartlife.iot.smartbulb.lightingservice\": 
 const char *KASAUtil::light_off = "{\"smartlife.iot.smartbulb.lightingservice\": {\"transition_light_state\": {\"on_off\": 0}}}";
 const char *KASAUtil::set_brightness = "{\"smartlife.iot.smartbulb.lightingservice\": {\"transition_light_state\": {\"brightness\": ";
 const char *KASAUtil::set_temperature = "{\"smartlife.iot.smartbulb.lightingservice\": {\"transition_light_state\": {\"color_temp\": ";
+const char *KASAUtil::strip_light_on = "{\"smartlife.iot.lightStrip\": {\"set_light_state\": {\"on_off\": 1}}}";
+const char *KASAUtil::strip_light_off = "{\"smartlife.iot.lightStrip\": {\"set_light_state\": {\"on_off\": 0}}}";
+const char *KASAUtil::strip_set_brightness = "{\"smartlife.iot.lightStrip\": {\"set_light_state\": {\"brightness\": ";
+
 const char *KASAUtil::set_color[5] = {
     //White
-    "{\"smartlife.iot.smartbulb.lightingservice\": {\"transition_light_state\": {\"hue\": 0, \"saturation\": 0, \"color_temp\": 2700}}}",
+    "{\"smartlife.iot.smartbulb.lightingservice\": {\"transition_light_state\": {\"hue\": 0, \"saturation\": 0, \"color_temp\": 3000}}}",
     //Blue
     "{\"smartlife.iot.smartbulb.lightingservice\": {\"transition_light_state\": {\"hue\": 240, \"saturation\": 100, \"color_temp\": 0}}}",
     //Red
@@ -26,6 +31,20 @@ const char *KASAUtil::set_color[5] = {
     //Purple
     "{\"smartlife.iot.smartbulb.lightingservice\": {\"transition_light_state\": {\"hue\": 270, \"saturation\": 100, \"color_temp\": 0}}}"
 };
+
+const char *KASAUtil::strip_set_color[5] = {
+    //White
+    "{\"smartlife.iot.lightStrip\": {\"set_light_state\": {\"hue\": 26, \"saturation\": 28}}}",
+    //Blue
+    "{\"smartlife.iot.lightStrip\": {\"set_light_state\": {\"hue\": 240, \"saturation\": 100}}}",
+    //Red
+    "{\"smartlife.iot.lightStrip\": {\"set_light_state\": {\"hue\": 0, \"saturation\": 100}}}",
+    //Green
+    "{\"smartlife.iot.lightStrip\": {\"set_light_state\": {\"hue\": 120, \"saturation\": 100}}}",
+    //Purple
+    "{\"smartlife.iot.lightStrip\": {\"set_light_state\": {\"hue\": 270, \"saturation\": 100}}}"
+};
+
 const char *KASAUtil::query_end = "}}}";
 static const char *TAG = "KasaSmartPlug";
 
@@ -232,8 +251,8 @@ int KASAUtil::ScanDevicesAndAdd(int timeoutMs, char* arr[], const int size)
                             // New device has been found
                             if (deviceFound < MAX_PLUG_ALLOW) {
                                 //Case if the model is a smart plug "ES", "HS", "KP"
-                                //Case if the model is a light device
-                                if(IsStartWith("KL", model)){
+                                //Case if the model is a BULB device
+                                if(IsStartWith("KL1", model)){
                                     state = get_sysinfo["light_state"]["on_off"];
                                     int brightness = get_sysinfo["light_state"]["brightness"];
                                     int temp = get_sysinfo["light_state"]["color_temp"];
@@ -241,7 +260,15 @@ int KASAUtil::ScanDevicesAndAdd(int timeoutMs, char* arr[], const int size)
                                     strcpy(ptr_plugs[deviceFound]->model, model);
                                     deviceFound++;
                                 //Case if the found model does not match any known model
-                                } else {
+                                } else if (IsStartWith("KL4", model)){
+                                    state = get_sysinfo["light_state"]["on_off"];
+                                    int brightness = get_sysinfo["light_state"]["brightness"];
+                                    ptr_plugs[deviceFound] = new KASASmartStrip(string_value, raddr_name, brightness);
+                                    strcpy(ptr_plugs[deviceFound]->model, model);
+                                    deviceFound++;
+                                } else 
+                                
+                                {
                                     state = get_sysinfo["relay_state"];
                                     ptr_plugs[deviceFound] = new KASASmartPlug(string_value, raddr_name);    
                                     strcpy(ptr_plugs[deviceFound]->model, model);
@@ -415,6 +442,7 @@ void KASADevice::SendCommand(const char *cmd)
     vTaskDelay(10 / portTICK_PERIOD_MS); // Make sure the data has been send out before close the socket.
     CloseSock();
     xSemaphoreGive(mutex);
+
 }
 
 int KASASmartPlug::QueryInfo()
@@ -546,6 +574,16 @@ void KASASmartBulb::turnOff(){
     SendCommand(KASAUtil::light_off);
 }
 
+void KASASmartStrip::turnOff(){
+    this->state = 0;
+    SendCommand(KASAUtil::strip_light_off);
+}
+
+void KASASmartStrip::turnOn(){
+    this->state = 1;
+    SendCommand(KASAUtil::strip_light_on);
+}
+
 void KASASmartBulb::setBrightness(const int brightness){
     this->brightness = brightness;
     char brightness_str[3];
@@ -558,10 +596,25 @@ void KASASmartBulb::setBrightness(const int brightness){
 
     SendCommand(result);
 }
+void KASASmartStrip::setBrightness(const int brightness){
+    this->brightness = brightness;
+    char brightness_str[3];
+    snprintf(brightness_str, sizeof(brightness_str), "%d", brightness);
+    size_t length = strlen(KASAUtil::set_brightness) + strlen(brightness_str) + strlen(KASAUtil::query_end) + 1;
+    char* result = new char[length];
+    strcpy(result, KASAUtil::strip_set_brightness);
+    strcat(result, brightness_str);
+    strcat(result, KASAUtil::query_end);
+
+    SendCommand(result);
+}
 
 void KASASmartBulb::setColor(const int colorCode){
-    Serial.println(KASAUtil::set_color[colorCode]);
     SendCommand(KASAUtil::set_color[colorCode]);
+}
+
+void KASASmartStrip::setColor(const int colorCode){
+    SendCommand(KASAUtil::strip_set_color[colorCode]);
 }
 
 void KASASmartBulb::toggle(){

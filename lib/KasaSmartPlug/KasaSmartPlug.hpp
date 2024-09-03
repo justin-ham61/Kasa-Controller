@@ -133,7 +133,10 @@ class KASADevice{
         err_code = 0;
         xSemaphoreGive(mutex);
     }
-
+    virtual void turnOn(){}
+    virtual void turnOff(){}
+    virtual void setBrightness(const int brightness){}
+    virtual void setColor(const int colorCode){}
     virtual ~KASADevice(){}
 
     virtual const char* getType() {
@@ -143,21 +146,36 @@ class KASADevice{
 
 class KASASmartBulb: public KASADevice{
     public:
-    int brightness;
-    int temp;
-    int GetDeviceInfo();
-    void turnOn();
-    void turnOff();
-    void toggle();
-    void setBrightness(const int brightness);
-    void setColor(const int colorCode);
+        int brightness;
+        int temp;
+        int GetDeviceInfo();
+        void turnOn() override;
+        void turnOff() override;
+        void toggle();
+        void setBrightness(const int brightness) override;
+        void setColor(const int colorCode) override;
 
-    KASASmartBulb(const char *name, const char *ip, int brightness, int temp)
-        :KASADevice(name, ip), brightness(brightness), temp(temp){}
+        KASASmartBulb(const char *name, const char *ip, int brightness, int temp)
+            :KASADevice(name, ip), brightness(brightness), temp(temp){}
 
-    virtual const char* getType() override{
-        return "KASASmartBulb";
-    }
+        virtual const char* getType() override{
+            return "KASASmartBulb";
+        }
+};
+
+class KASASmartStrip: public KASADevice{
+    public:
+        int brightness;
+        int hue;
+        void turnOn() override;
+        void turnOff() override;
+        void setBrightness(const int brightness) override;
+        void setColor(const int colorCode) override;
+        KASASmartStrip(const char *name, const char *ip, int brightness)
+            :KASADevice(name, ip), brightness(brightness){}
+        virtual const char* getType() override{
+            return "KASASmartStrip";
+        }
 };
 
 //Smart Plug Class
@@ -212,6 +230,11 @@ public:
     static const char* set_brightness;
     static const char* set_temperature;
     static const char* set_color[5];
+    static const char* strip_set_color[5];
+    static const char* strip_light_on;
+    static const char* strip_light_off;
+    static const char* strip_set_brightness;
+
     static const char* query_end;
 
     int ScanDevicesAndAdd(int timeoutMs, char* arr[], const int size);
@@ -235,13 +258,7 @@ class Credentials{
     const char* dejsa_url = "http://10.0.0.97:9999/app/handshake1";
     const char* strip_url = "http://10.0.0.138:9999/app/handshake1";
     public:
-    
-    void handshake1()
-    {
-        uint8_t local_seed[16];
-        
 
-    }
 
 
 };
