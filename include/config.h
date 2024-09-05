@@ -17,6 +17,6 @@ char* aliases[] = {
   "Strip"
 };
 
-const int size = sizeof(aliases)/sizeof(aliases[0]);
+extern int size;
 
 #endif
