@@ -37,7 +37,7 @@ AiEsp32RotaryEncoderNumberSelector quick_number_selector = AiEsp32RotaryEncoderN
 AiEsp32RotaryEncoder menu_rotary_encoder = AiEsp32RotaryEncoder(MENU_ROTARY_DT, MENU_ROTARY_CLK, MENU_ROTARY_SW, VCC_PIN, ROTARY_ENCODER_STEPS);
 
 //Queue Set up
-static const uint8_t max_command_queue_len = 5;
+static const uint8_t max_command_queue_len = 10;
 static QueueHandle_t command_queue;
 
 static const uint8_t max_toggle_queue_len = 5;
@@ -92,6 +92,7 @@ KASAUtil kasaUtil;
 KASASmartBulb* currentBulb;
 KASASmartStrip* currentStrip;
 int numberOfBulbs;
+bool all_state = false;
 
 //DeviceMode
 uint8_t device_mode = 0b00000001;
@@ -168,10 +169,12 @@ IRAM_ATTR void readEncoderISRMenu(){
 
 IRAM_ATTR void menuRotaryHandle(){
     xTimerStart(xMenuRotarySwitchTimer, 0);
+    xTimerStartFromISR(xIdleTimer, 0);
 }
 
 IRAM_ATTR void quickRotaryHandle(){
-    
+    xTimerStart(xQuickRotarySwitchTimer, 0);
+    xTimerStartFromISR(xIdleTimer, 0);
 }
 
 // Handles buttons based on current context and adds the command to the queue
@@ -179,12 +182,13 @@ IRAM_ATTR void quickRotaryHandle(){
 void vButtonTimerCallback(TimerHandle_t xTimer){
     command new_command; 
     if(device_mode & 1){
-        for(int i = 0; i < 5; i++){
+        for(int i = 0; i < numberOfBulbs; i++){
             uint8_t curr_bitmask = 1 << i;
             if (button_state_flag & curr_bitmask){
                 button_state_flag &= ~(1 << i);
+                KASADevice* dev = kasaUtil.GetSmartPlugByIndex(i);
+                new_command.value = dev->state;
                 new_command.index = i;
-                new_command.value = 0;
                 new_command.task = 0;
                 if(xQueueSend(command_queue, (void *)&new_command, 10) != pdTRUE){
                     Serial.println("Queue Full");
@@ -236,7 +240,6 @@ void vIdleTimerCallback(TimerHandle_t xIdleTimer){
 }
 
 void vQuickRotaryCallback(TimerHandle_t xQuickRotaryTimer){
-    Serial.println("Rotary Timer Call back");
     command new_command;
     new_command.task = 1;
     new_command.value = quick_number_selector.getValue();
@@ -293,6 +296,19 @@ void vMenuSwitchCallback(TimerHandle_t xMenuRotarySwitchTimer){
     xTimerStart(xIdleTimer, 0);
 }
 
+void vQuickSwitchCallback(TimerHandle_t xQuickRotarySwitchTimer){
+    command new_command;
+    new_command.task = 0;
+    new_command.value = all_state;
+    for(int i = 0; i < numberOfBulbs; i++){
+        new_command.index = i;
+        if(xQueueSend(command_queue, (void *)&new_command, 10) != pdTRUE){
+            Serial.println("Queue is Full");
+        }
+    }
+    all_state = !all_state;
+}
+
 void readCommandTask(void *parameter){
     command curr_command;
     while(1){
@@ -332,7 +348,7 @@ void toggleTask(void *parameter){
         if(xQueueReceive(toggle_queue, (void *)&toggle_command, portMAX_DELAY) == pdTRUE){
             xSemaphoreTake(wifiSemaphore, portMAX_DELAY);
             KASADevice* dev = kasaUtil.GetSmartPlugByIndex(toggle_command.index);
-            if(dev->state == 0){
+            if(toggle_command.value == 0){
                 dev->turnOn();
                 menuItems[toggle_command.index].icon = 1;
             } else {
@@ -344,6 +360,7 @@ void toggleTask(void *parameter){
             }
             xTaskNotifyGive(display_task_handle);
             xSemaphoreGive(wifiSemaphore);
+
         }
     }
 }
@@ -553,7 +570,10 @@ void addDevices(void *parameter){
         int data_len = EEPROM.read(2);
         int alias_len = EEPROM.read(read_index);
 
-        while(alias_len != 255){
+        //Load fail safe
+        int loop = 0;
+
+        while(alias_len != 255 && loop < size){
             char alias[10];
             char ip[20];
 
@@ -585,25 +605,46 @@ void addDevices(void *parameter){
                 }
             }
             ip[ip_len] = '\0';
-        
+
+            uint8_t dev_type = EEPROM.read(read_index);
+            read_index++;
+            if(read_index >= 256){
+                read_index = 3;
+            }      
+
+
+
             Serial.println(alias);
             Serial.println(ip);
+            Serial.println(dev_type);
 
-            const char *alias_ptr = alias;
-            const char *ip_ptr = ip;
+            for(int i = 0; i < size; i++){
+                if(strcmp(alias, aliases[i]) == 0){
+                    const char *alias_ptr = alias;
+                    const char *ip_ptr = ip;
+                    
+                    switch(dev_type){
+                        case 0: 
+                            break;
+                        case 1:
+                            kasaUtil.CreateDevice(alias, ip, "bulb");
+                            break;
+                        case 2: 
+                            kasaUtil.CreateDevice(alias, ip, "strip");
+                            break;
+                    }
 
-            kasaUtil.CreateDevice(alias, ip, "bulb");
-
-            Serial.print("Added from memory: ");
-            Serial.println(alias);
+                    Serial.print("Added from memory: ");
+                    Serial.println(alias);
+                }
+            }
 
             memset(alias, 0, sizeof(alias));
             memset(ip, 0, sizeof(ip));
 
             alias_len = EEPROM.read(read_index);
+            loop++;
         } 
-
- 
 
         //Load devices from back up first, then scan for new devices or IP address update
         numberOfBulbs = kasaUtil.ScanDevicesAndAdd(1000, aliases, size);
@@ -612,13 +653,13 @@ void addDevices(void *parameter){
             menuItems[i] = {kasaUtil.GetSmartPlugByIndex(i)->alias, 1, 0};
         }
         
-        menuItems[numberOfBulbs] = {"White", 1, 1};
-        menuItems[numberOfBulbs + 1] = {"Blue", 1, 1};
-        menuItems[numberOfBulbs + 2] = {"Red", 1, 1};
-        menuItems[numberOfBulbs + 3] = {"Green", 1, 1};
-        menuItems[numberOfBulbs + 4] = {"Purple", 1, 1};
+        menuItems[numberOfBulbs] = {"White", 5, 1};
+        menuItems[numberOfBulbs + 1] = {"Blue", 5, 1};
+        menuItems[numberOfBulbs + 2] = {"Red", 5, 1};
+        menuItems[numberOfBulbs + 3] = {"Green", 5, 1};
+        menuItems[numberOfBulbs + 4] = {"Purple", 5, 1};
         menuItems[numberOfBulbs + 5] = {"Reset", 3, 2};
-        menuItems[numberOfBulbs + 6] = {"Save", 3, 3};
+        menuItems[numberOfBulbs + 6] = {"Save", 4, 3};
 
         xTaskNotifyGive(display_task_handle);
         xSemaphoreGive(wifiSemaphore);
@@ -633,27 +674,43 @@ void addDevices(void *parameter){
 
 void updateFlash(void *parameter){
     while(1){
-        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY); 
         Serial.println("notified");
         uint8_t memory_buffer[256];
         int index = 0;
-        for(int i = 0; i < numberOfBulbs; i++){
-            KASASmartBulb* bulb = static_cast<KASASmartBulb*>(kasaUtil.GetSmartPlugByIndex(i));
-            uint8_t alias_len = static_cast<int>(strlen(bulb->alias));
+
+        //Saving device with types
+        //0 = plug, 1 = bulb, 2 = strip
+        for (int i = 0; i < numberOfBulbs; i++){
+            KASADevice* dev = kasaUtil.GetSmartPlugByIndex(i);
+            uint8_t alias_len = static_cast<int>(strlen(dev->alias));
             memory_buffer[index] = alias_len;
             index++;
             for(int j = 0; j < alias_len; j++){
-                memory_buffer[index] = bulb->alias[j];
+                memory_buffer[index] = dev->alias[j];
                 index++;
             }
-            uint8_t ip_len = static_cast<int>(strlen(bulb->ip_address));
+
+            uint8_t ip_len = static_cast<int>(strlen(dev->ip_address));
             memory_buffer[index] = ip_len;
             index++;
             for(int j = 0; j < ip_len; j++){
-                memory_buffer[index] = bulb->ip_address[j];
+                memory_buffer[index] = dev->ip_address[j];
                 index++;
             }
+
+            //Save device type on a byte
+            const char* dev_type = dev->getType();
+            if(strcmp(dev_type, "KASASmartBulb") == 0){
+                memory_buffer[index] = 1;
+            } else if (strcmp(dev_type, "KASASmartStrip") == 0){
+                memory_buffer[index] = 2;
+            } else {
+                memory_buffer[index] = 0;
+            }
+            index++;
         }
+
         memory_buffer[index] = 255;
         index++;
 
@@ -799,7 +856,7 @@ void setup() {
         pdMS_TO_TICKS(50),
         pdFALSE,
         (void *)0,
-        vMenuSwitchCallback
+        vQuickSwitchCallback
     );
 
     
@@ -912,7 +969,6 @@ void setup() {
 
     //Pin set up for sleep wake up
     xTimerStart(xIdleTimer, portMAX_DELAY);
-
 }
 
 void loop(){

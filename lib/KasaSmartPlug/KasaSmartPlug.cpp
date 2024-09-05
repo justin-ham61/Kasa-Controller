@@ -367,7 +367,10 @@ bool KASAUtil::CreateDevice(const char *alias, const char *ip, const char *type)
             ptr_plugs[deviceFound] = bulb;
             deviceFound++;
         }
-    } else if (strcmp(type, "plug") == 0){
+    } else if (strcmp(type, "strip") == 0){
+        KASASmartStrip* strip = new KASASmartStrip(alias, ip, 0);
+        ptr_plugs[deviceFound] = strip;
+        deviceFound++;
         return true;
     } else {
         return false;

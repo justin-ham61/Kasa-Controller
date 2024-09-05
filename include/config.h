@@ -13,8 +13,8 @@ WifiParameters_t wifi_params = {SSID, PASS};
 char* aliases[] = {
   "Lauter",
   "Dejsa",
-  "Ball",
-  "Bedroom 1"
+  "Fado",
+  "Strip"
 };
 
 const int size = sizeof(aliases)/sizeof(aliases[0]);
