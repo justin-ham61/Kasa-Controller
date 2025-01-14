@@ -13,7 +13,7 @@ extern AiEsp32RotaryEncoderNumberSelector quick_number_selector;
 extern AiEsp32RotaryEncoder menu_rotary_encoder;
 extern Adafruit_SSD1306 display;
 extern int numberOfBulbs;
-extern menu_item menuItems[12];
+extern menu_item menuItems[15];
 
 void vMenuDisplayTask(void *parameters)
 {
@@ -27,10 +27,10 @@ void vMenuDisplayTask(void *parameters)
         currItem = menu_rotary_encoder.readEncoder();
         previousItem = currItem - 1;
         if(previousItem < 0){
-            previousItem = numberOfBulbs + 6;
+            previousItem = numberOfBulbs + 9;
         }
         nextItem = currItem + 1;
-        if(nextItem >= numberOfBulbs + 7){
+        if(nextItem >= numberOfBulbs + 10){
             nextItem = 0;
         }
 
@@ -61,7 +61,7 @@ void vMenuDisplayTask(void *parameters)
         display.print(menuItems[nextItem].name);
 
         //Scroll position box
-        display.fillRect(125, (64/(numberOfBulbs + 7)) * currItem, 3, (64/(numberOfBulbs + 7)), WHITE);
+        display.fillRect(125, (64/(numberOfBulbs + 10)) * currItem, 3, (64/(numberOfBulbs + 10)), WHITE);
 
         //Display
         display.display();

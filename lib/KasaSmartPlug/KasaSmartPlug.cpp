@@ -19,7 +19,7 @@ const char *KASAUtil::strip_light_on = "{\"smartlife.iot.lightStrip\": {\"set_li
 const char *KASAUtil::strip_light_off = "{\"smartlife.iot.lightStrip\": {\"set_light_state\": {\"on_off\": 0}}}";
 const char *KASAUtil::strip_set_brightness = "{\"smartlife.iot.lightStrip\": {\"set_light_state\": {\"brightness\": ";
 
-const char *KASAUtil::set_color[5] = {
+const char *KASAUtil::set_color[8] = {
     //White
     "{\"smartlife.iot.smartbulb.lightingservice\": {\"transition_light_state\": {\"hue\": 0, \"saturation\": 0, \"color_temp\": 3000}}}",
     //Blue
@@ -29,10 +29,16 @@ const char *KASAUtil::set_color[5] = {
     //Green
     "{\"smartlife.iot.smartbulb.lightingservice\": {\"transition_light_state\": {\"hue\": 120, \"saturation\": 100, \"color_temp\": 0}}}",
     //Purple
-    "{\"smartlife.iot.smartbulb.lightingservice\": {\"transition_light_state\": {\"hue\": 270, \"saturation\": 100, \"color_temp\": 0}}}"
+    "{\"smartlife.iot.smartbulb.lightingservice\": {\"transition_light_state\": {\"hue\": 270, \"saturation\": 100, \"color_temp\": 0}}}",
+    //Warm
+    "{\"smartlife.iot.smartbulb.lightingservice\": {\"transition_light_state\": {\"hue\": 0, \"saturation\": 0, \"color_temp\": 3000}}}",
+    //Daylight
+    "{\"smartlife.iot.smartbulb.lightingservice\": {\"transition_light_state\": {\"hue\": 0, \"saturation\": 0, \"color_temp\": 4200}}}",
+    //Cool
+    "{\"smartlife.iot.smartbulb.lightingservice\": {\"transition_light_state\": {\"hue\": 0, \"saturation\": 0, \"color_temp\": 5800}}}"
 };
 
-const char *KASAUtil::strip_set_color[5] = {
+const char *KASAUtil::strip_set_color[8] = {
     //White
     "{\"smartlife.iot.lightStrip\": {\"set_light_state\": {\"hue\": 26, \"saturation\": 28}}}",
     //Blue
@@ -42,10 +48,17 @@ const char *KASAUtil::strip_set_color[5] = {
     //Green
     "{\"smartlife.iot.lightStrip\": {\"set_light_state\": {\"hue\": 120, \"saturation\": 100}}}",
     //Purple
-    "{\"smartlife.iot.lightStrip\": {\"set_light_state\": {\"hue\": 270, \"saturation\": 100}}}"
+    "{\"smartlife.iot.lightStrip\": {\"set_light_state\": {\"hue\": 270, \"saturation\": 100}}}",
+    //Warm
+    "{\"smartlife.iot.lightStrip\": {\"set_light_state\": {\"hue\": 26, \"saturation\": 28}}}",
+    //Daylight
+    "{\"smartlife.iot.lightStrip\": {\"set_light_state\": {\"hue\": 58, \"saturation\": 5}}}",
+    //Cool
+    "{\"smartlife.iot.lightStrip\": {\"set_light_state\": {\"hue\": 225, \"saturation\": 15}}}"
 };
 
 const char *KASAUtil::query_end = "}}}";
+/// @brief 
 static const char *TAG = "KasaSmartPlug";
 
 //Encryption meathod for payload json

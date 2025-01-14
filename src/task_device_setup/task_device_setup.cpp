@@ -9,7 +9,7 @@
 
 extern SemaphoreHandle_t wifiSemaphore;
 extern KASAUtil kasaUtil;
-extern menu_item menuItems[12];
+extern menu_item menuItems[15];
 extern TaskHandle_t display_task_handle;
 extern int numberOfBulbs;
 extern char* aliases[];
@@ -111,11 +111,16 @@ void vAddDeviceTask(void *parameter)
         menuItems[numberOfBulbs + 2] = {"Red", 5, 1};
         menuItems[numberOfBulbs + 3] = {"Green", 5, 1};
         menuItems[numberOfBulbs + 4] = {"Purple", 5, 1};
-        menuItems[numberOfBulbs + 5] = {"Reset", 3, 2};
-        menuItems[numberOfBulbs + 6] = {"Save", 4, 3};
+        menuItems[numberOfBulbs + 5] = {"Warm", 5, 1};
+        menuItems[numberOfBulbs + 6] = {"Day", 5, 1};
+        menuItems[numberOfBulbs + 7] = {"Cool", 5, 1};
+        menuItems[numberOfBulbs + 8] = {"Reset", 3, 2};
+        menuItems[numberOfBulbs + 9] = {"Save", 4, 3};
 
         xTaskNotifyGive(display_task_handle);
         xSemaphoreGive(wifiSemaphore);
+        UBaseType_t highWaterMark = uxTaskGetStackHighWaterMark(NULL);
+        printf("Stack high-water mark: %lu\n", highWaterMark);
         vTaskSuspend(NULL);
     }
 }

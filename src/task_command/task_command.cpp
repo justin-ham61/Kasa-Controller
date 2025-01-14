@@ -53,10 +53,11 @@ void vReadCommandTask(void *parameter)
 void vToggleTask(void *parameter)
 {
     command toggle_command;
+    KASADevice* dev;
     while(1){
         if(xQueueReceive(toggle_queue, (void *)&toggle_command, portMAX_DELAY) == pdTRUE){
             xSemaphoreTake(wifiSemaphore, portMAX_DELAY);
-            KASADevice* dev = kasaUtil.GetSmartPlugByIndex(toggle_command.index);
+            dev = kasaUtil.GetSmartPlugByIndex(toggle_command.index);
             if(toggle_command.value == 0){
                 dev->turnOn();
                 menuItems[toggle_command.index].icon = 1;
@@ -69,7 +70,6 @@ void vToggleTask(void *parameter)
             }
             xTaskNotifyGive(display_task_handle);
             xSemaphoreGive(wifiSemaphore);
-
         }
     }
 }

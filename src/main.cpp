@@ -102,7 +102,7 @@ uint8_t device_mode = 0b00000001;
 //Display config
 #define OLED_ADDR 0x3C
 Adafruit_SSD1306 display(128, 64, &Wire, -1);
-menu_item menuItems[12];
+menu_item menuItems[15];
 
 
 //Task Params
@@ -393,7 +393,7 @@ void setup() {
     xTaskCreate(
         vAddDeviceTask,
         "Device Task",
-        10000,
+        6000,
         NULL,
         3,
         &device_discover_task_handle
@@ -518,7 +518,7 @@ void setup() {
 
     menu_rotary_encoder.begin();
     menu_rotary_encoder.setup(readEncoderISRMenu);
-    menu_rotary_encoder.setBoundaries(0,size + 6,true);
+    menu_rotary_encoder.setBoundaries(0,size + 9,true);
     menu_rotary_encoder.disableAcceleration();
 
     xTaskCreate(

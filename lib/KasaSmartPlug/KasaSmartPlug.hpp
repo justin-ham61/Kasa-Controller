@@ -229,8 +229,8 @@ public:
     static const char *light_off;
     static const char* set_brightness;
     static const char* set_temperature;
-    static const char* set_color[5];
-    static const char* strip_set_color[5];
+    static const char* set_color[8];
+    static const char* strip_set_color[8];
     static const char* strip_light_on;
     static const char* strip_light_off;
     static const char* strip_set_brightness;
